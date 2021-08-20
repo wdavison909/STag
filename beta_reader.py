@@ -17,10 +17,10 @@ def beta_reader():
     He_emi_beta = np.loadtxt('/Beta Values/he_emi_beta_final2.txt')
     He_cyg_beta = np.loadtxt('/Beta Values/he_cyg_beta_final2.txt')
     He_abs_beta = np.loadtxt('/Beta Values/he_abs_beta_final2.txt')
-    H_alp_beta = np.loadtxt('/Beta Values/h_cyg_beta_final2.txt')
+    H_alp_beta = np.loadtxt('/Beta Values/h_alp_beta_final2.txt')
     Ca_beta = np.loadtxt('/Beta Values/ca_beta_final2.txt')
     iib_dp_beta = np.loadtxt('/Beta Values/iibdp_beta_final2.txt')
-    Fe_beta = np.loadtxt('/Beta Values/5000A_beta_final2.txt')
-    S_beta = np.loadtxt('/Beta Values/5600A_beta_final2.txt')
+    Fe_beta = np.loadtxt('/Beta Values/fe_beta_final2.txt')
+    S_beta = np.loadtxt('/Beta Values/s_beta_final2.txt')
 
     return H_beta,Si_beta,He_emi_beta,He_cyg_beta,He_abs_beta,H_alp_beta,Ca_beta,iib_dp_beta,Fe_beta,S_beta
