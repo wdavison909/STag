@@ -17,8 +17,6 @@ import sys
 import numpy as np
 import astropy.io.fits as afits
 from scipy.interpolate import interp1d, UnivariateSpline
-from astrodash.array_tools import normalise_spectrum, zero_non_overlap_part
-from astrodash.read_from_catalog import catalogDict
 from scipy.signal import medfilt
 from scipy.integrate import cumtrapz
 
@@ -66,38 +64,6 @@ class ReadSpectrumFile(object):
         self.nw = nw
         self.processingTools = ProcessingTools()
 
-    def read_fits_file(self):
-        # filename = unicode(self.filename.toUtf8(), encoding="UTF-8")
-        try:
-            if 'specutils' not in sys.modules:
-                from specutils.io import read_fits
-
-            spectrum = read_fits.read_fits_spectrum1d(self.filename)
-            if len(spectrum) > 1:
-                spectrum = spectrum[0]
-            try:
-                wave = np.array(spectrum.wavelength)
-                flux = np.array(spectrum.flux)
-            except AttributeError:
-                wave = np.array(spectrum.dispersion)
-                flux = np.array(spectrum.flux)
-                print("No wavelength attribute in FITS File. Using 'dispersion' attribute instead")
-        except Exception as e:
-            hdulist = afits.open(self.filename)
-            flux = hdulist[0].data
-            header = hdulist[0].header
-            if 'CDELT1' in header:
-                wave_step = header['CDELT1']
-            else:
-                wave_step = header['CD1_1']
-            wave_start = header['CRVAL1'] - (header['CRPIX1'] - 1) * wave_step
-            wave_num = flux.shape[0]
-            wave = np.linspace(wave_start, wave_start + wave_step * wave_num, num=wave_num)
-
-        flux[np.isnan(flux)] = 0  # convert nan's to zeros
-
-        return wave, flux
-
     def read_dat_file(self):
         try:
             if USE_PANDAS is True:
@@ -126,24 +92,6 @@ class ReadSpectrumFile(object):
 
         return wave, flux
 
-    def read_superfit_template(self):
-        wave, flux = self.read_dat_file()
-        tType = os.path.split(os.path.split(self.filename)[0])[-1]  # Name of directory is the type name
-        filename = os.path.basename(self.filename)
-        snName, ageInfo = os.path.basename(filename).strip('.dat').split('.')
-        if ageInfo == 'max':
-            age = 0
-        elif ageInfo[0] == 'm':
-            age = -float(ageInfo[1:])
-        elif ageInfo[0] == 'p':
-            age = float(ageInfo[1:])
-        else:
-            raise Exception("Invalid Superfit file: {0}".format(self.filename))
-
-        nCols = 1
-
-        return wave, flux, nCols, [age], tType
-
     def file_extension(self, template=False):
         if isinstance(self.filename, (list, np.ndarray)):  # Is an Nx2 array
             wave, flux = self.filename[:,0], self.filename[:,1]
@@ -155,17 +103,8 @@ class ReadSpectrumFile(object):
             filename = os.path.basename(self.filename)
             extension = filename.split('.')[-1]
 
-            if template is True and extension == 'dat' and len(filename.split('.')) == 3 and filename.split('.')[1][
-                0] in ['m', 'p']:  # Check if input is a superfit template
-                return self.read_superfit_template()
-            elif self.filename.split('-')[0] in list(catalogDict.keys()):  # Read input from catalog
-                return catalogDict[self.filename[0:3]](self.filename)
-            elif extension == self.filename or extension in ['flm', 'txt', 'dat']:
+            if extension == self.filename or extension in ['flm', 'txt', 'dat']:
                 return self.read_dat_file()
-            elif extension == 'fits':
-                return self.read_fits_file()
-            elif extension == 'lnw':
-                return self.snid_template_spectra_all()
             else:
                 try:
                     return self.read_dat_file()
@@ -189,71 +128,22 @@ class ReadSpectrumFile(object):
 
         return wave, fluxNorm
 
-    def snid_template_spectra_all(self):
-        """lnw file"""
-        with open(self.filename, 'r') as FileObj:
-            for lineNum, line in enumerate(FileObj):
-                # Read Header Info
-                if lineNum == 0:
-                    header = (line.strip('\n')).split(' ')
-                    header = [x for x in header if x != '']
-                    numAges, nwx, w0x, w1x, mostKnots, tname, dta, ttype, ittype, itstype = header
-                    numAges, mostKnots = map(int, (numAges, mostKnots))
-                    nk = np.zeros(numAges)
-                    fmean = np.zeros(numAges)
-                    xk = np.zeros((mostKnots, numAges))
-                    yk = np.zeros((mostKnots, numAges))
+def zero_non_overlap_part(array, minIndex, maxIndex, outerVal=0.):
+    slicedArray = np.copy(array)
+    slicedArray[0:minIndex] = outerVal * np.ones(minIndex)
+    slicedArray[maxIndex:] = outerVal * np.ones(len(array) - maxIndex)
 
-                # Read Spline Info
-                elif lineNum == 1:
-                    splineInfo = (line.strip('\n')).split(' ')
-                    splineInfo = [x for x in splineInfo if x != '']
-                    for j in range(numAges):
-                        nk[j], fmean[j] = (splineInfo[2 * j + 1], splineInfo[2 * j + 2])
-                elif lineNum in range(2, mostKnots + 2):
-                    splineInfo = (line.strip('\n')).split(' ')
-                    splineInfo = [x for x in splineInfo if x != '']
-                    for j in range(numAges):
-                        xk[lineNum - 2, j], yk[lineNum - 2, j] = (splineInfo[2 * j + 1], splineInfo[2 * j + 2])
-
-                elif lineNum == mostKnots + 2:
-                    break
-
-        splineInfo = (nk, fmean, xk, yk)
-
-        # Read Normalized spectra
-        if USE_PANDAS is True:
-            arr = pd.read_csv(self.filename, skiprows=mostKnots + 2, header=None, delim_whitespace=True).values
-        else:
-            arr = np.loadtxt(self.filename, skiprows=mostKnots + 2)
-        ages = arr[0]
-        ages = np.delete(ages, 0)
-        arr = np.delete(arr, 0, 0)
-
-        wave = arr[:, 0]
-        fluxes = np.zeros(shape=(numAges, len(arr)))  # initialise 2D array
-
-        for i in range(0, len(arr[0]) - 1):
-            fluxes[i] = arr[:, i + 1]
-
-        if ttype == 'Ia-99aa':
-            ttype = 'Ia-91T'
-        elif ttype == 'Ia-02cx':
-            ttype = 'Iax'
-
-        return wave, fluxes, numAges, ages, ttype, splineInfo
-
-    def snid_template_undo_processing(self, wave, flux, splineInfo, ageIdx):
-        # Undo continuum removal -> then add galaxy -> then redshift
-        nkAll, fmeanAll, xkAll, ykAll = splineInfo
-        nk, fmean, xk, yk = int(nkAll[ageIdx]), fmeanAll[ageIdx], xkAll[:, ageIdx], ykAll[:, ageIdx]
-        xk, yk = xk[:nk], yk[:nk]
-
-        # NEED TO USE THIS TO ACTUALLY ADD THE SPLINE CONTINUUM BACK. NOT DOING ANYTHING AT THE MOMENT.
-
-        return wave, flux
+    return slicedArray
 
 
+def normalise_spectrum(flux):
+    if len(flux) == 0 or min(flux) == max(flux):  # No data
+        fluxNorm = np.zeros(len(flux))
+    else:
+        fluxNorm = (flux - min(flux)) / (max(flux) - min(flux))
+
+    return fluxNorm
+    
 class PreProcessSpectrum(object):
     def __init__(self, w0, w1, nw):
         self.w0 = w0
@@ -267,7 +157,6 @@ class PreProcessSpectrum(object):
         wlog = self.w0 * np.exp(np.arange(0, self.nw) * self.dwlog)
 
         fluxOut = self._vectorised_log_binning(wave, flux)
-        # fluxOut = self._original_log_binning(wave, flux)
 
         minIndex, maxIndex = self.processingTools.min_max_index(fluxOut, outerVal=0)
 
@@ -322,34 +211,6 @@ class PreProcessSpectrum(object):
             print('flux', flux)
             print("########################################ERROR#######################################\n\n\n\n")
             return np.zeros(self.nw)
-
-    def _original_log_binning(self, wave, flux):
-        """ Rebin wavelengths: adapted from SNID apodize.f subroutine rebin() """
-        fluxOut = np.zeros(int(self.nw))
-
-        for i in range(0, len(wave)):
-            if i == 0:
-                s0 = 0.5 * (3 * wave[i] - wave[i + 1])
-                s1 = 0.5 * (wave[i] + wave[i + 1])
-            elif i == len(wave) - 1:
-                s0 = 0.5 * (wave[i - 1] + wave[i])
-                s1 = 0.5 * (3 * wave[i] - wave[i - 1])
-            else:
-                s0 = 0.5 * (wave[i - 1] + wave[i])
-                s1 = 0.5 * (wave[i] + wave[i + 1])
-
-            s0log = np.log(s0 / self.w0) / self.dwlog + 1
-            s1log = np.log(s1 / self.w0) / self.dwlog + 1
-            dnu = s1 - s0
-
-            for j in range(int(s0log), int(s1log)):
-                if j < 0 or j >= self.nw:
-                    continue
-                alen = 1  # min(s1log, j+1) - max(s0log, j)
-                fluxval = flux[i] * alen / (s1log - s0log) * dnu
-                fluxOut[j] = fluxOut[j] + fluxval
-
-        return fluxOut
 
     def spline_fit(self, wave, flux, numSplinePoints, minindex, maxindex):
         continuum = np.zeros(int(self.nw)) + 1

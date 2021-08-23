@@ -247,16 +247,11 @@ def log_reg_two(spectra, beta):
   -------
   lr: array of logistic regression function values
   """
-  lr = []
-  for i in spectra:
-    z = param_sum(i, beta)
-    exp = np.exp(-z)
-    recip = 1/(1+exp)
-    lr.append(recip)
+  z = param_sum(spectra, beta)
+  exp = np.exp(-z)
+  recip = 1/(1+exp)
 
-  lr = np.asarray(lr)
-
-  return lr
+  return recip
 
 def gradient1(Y,sum_p):
   """
